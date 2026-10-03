@@ -1,0 +1,140 @@
+--[[\
+    Project: Delta Optimized Auto Steal Suite (Map & Tier Selector + GUI Toggle)
+    Author: 10년 차 Luau 전문가
+--]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+-- [설정 및 필터 옵션]
+local Config = {
+    Enabled = false,                     -- 오토 스틸 메인 스위치
+    SelectedMap = "All",                 -- 원하는 맵 이름 ("All" 또는 특정 맵 이름)
+    SelectedTier = "All",                -- 원하는 등급/종류 ("All" 또는 특정 등급 이름, 예: "Legendary", "Epic" 등)
+    TeleportDelay = 0.15,                -- 서버 킥 방지를 위한 텔레포트 딜레이
+    TargetFolder = workspace             -- 계란/아이템이 스폰되는 루트 폴더 (필요시 수정)
+}
+
+-- [1] GUI 생성 (델타 최적화 모바일 토글 버튼 & 패널)
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "DeltaAutoSteal_GUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = CoreGui
+
+-- 메인 플로팅 토글 버튼 (열고 닫기)
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Name = "ToggleBtn"
+ToggleBtn.Size = UDim2.new(0, 110, 0, 45)
+ToggleBtn.Position = UDim2.new(0.05, 0, 0.15, 0)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+ToggleBtn.BorderColor3 = Color3.fromRGB(0, 255, 128)
+ToggleBtn.BorderSizePixel = 2
+ToggleBtn.TextColor3 = Color3.fromRGB(0, 255, 128)
+ToggleBtn.TextSize = 14
+ToggleBtn.Font = Enum.Font.SourceSansBold
+ToggleBtn.Text = "STEAL: OFF"
+ToggleBtn.Active = true
+ToggleBtn.Draggable = true -- 모바일에서 손으로 드래그 이동 가능
+ToggleBtn.Parent = ScreenGui
+
+-- 설정 패널 (작은 정보 창)
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(0, 200, 0, 30)
+StatusLabel.Position = UDim2.new(0.05, 0, 0.22, 0)
+StatusLabel.BackgroundTransparency = 0.5
+StatusLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+StatusLabel.TextSize = 12
+StatusLabel.Font = Enum.Font.SourceSans
+StatusLabel.Text = "Map: All | Tier: All"
+StatusLabel.Parent = ScreenGui
+
+-- 버튼 클릭 시 토글 기능
+ToggleBtn.MouseButton1Click:Connect(function()
+    Config.Enabled = not Config.Enabled
+    if Config.Enabled then
+        ToggleBtn.Text = "STEAL: ON"
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 100, 50)
+        ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    else
+        ToggleBtn.Text = "STEAL: OFF"
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        ToggleBtn.TextColor3 = Color3.fromRGB(0, 255, 128)
+    end
+end)
+
+-- [2] 최적화된 아이템 필터링 및 순간이동 루프 (렉 방지용 task.defer / task.wait 활용)
+local function GetTargetEgg()
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return nil end
+    local rootPart = character.HumanoidRootPart
+
+    local closestEgg = nil
+    local shortestDist = math.huge
+
+    -- workspace 순회 (성능 부하를 줄이기 위해 하위 구조 정밀 탐색)
+    for _, obj in ipairs(Config.TargetFolder:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            local nameLower = obj.Name:lower()
+            -- 계란/아이템 키워드 매칭
+            if nameLower:find("egg") or nameLower:find("steal") or nameLower:find("item") then
+                
+                -- 맵 필터 검증 (오브젝트 상위 부모나 경로에 맵 이름이 포함되어 있는지 확인)
+                if Config.SelectedMap ~= "All" then
+                    local parentPath = obj:GetFullName()
+                    if not parentPath:lower():find(Config.SelectedMap:lower()) then
+                        continue
+                    end
+                end
+
+                -- 등급/티어 필터 검증 (오브젝트 이름이나 속성 태그에 등급이 포함되어 있는지 확인)
+                if Config.SelectedTier ~= "All" then
+                    if not nameLower:find(Config.SelectedTier:lower()) then
+                        continue
+                    end
+                end
+
+                local dist = (rootPart.Position - obj.Position).Magnitude
+                if dist < shortestDist then
+                    shortestDist = dist
+                    closestEgg = obj
+                end
+            end
+        end
+    end
+
+    return closestEgg
+end
+
+-- 백그라운드 파밍 스레드 (모바일 CPU 부하 최소화)
+task.spawn(function()
+    while true do
+        task.wait(Config.TeleportDelay)
+        
+        if Config.Enabled then
+            pcall(function()
+                local character = LocalPlayer.Character
+                if character and character:FindFirstChild("HumanoidRootPart") then
+                    local rootPart = character.HumanoidRootPart
+                    local target = GetTargetEgg()
+                    
+                    if target then
+                        -- 계란 위치 위로 안전하게 순간이동
+                        rootPart.CFrame = target.CFrame + Vector3.new(0, 3, 0)
+                        
+                        -- 상호작용 프롬프트 자동 트리거
+                        for _, prompt in ipairs(target:GetDescendants()) do
+                            if prompt:IsA("ProximityPrompt") then
+                                fireproximityprompt(prompt)
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+print("[+] Delta Optimized Auto Steal Loaded Successfully!")
